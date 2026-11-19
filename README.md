@@ -1,0 +1,104 @@
+# chat-demo 部署速记：GitHub Pages 与 Cloudflare Workers
+
+把 DeepSeek 官方开源的 chat-demo 变成自己的网址。纯前端项目，不需要服务器，也不需要在平台上配 API Key——Key 由每个访问者在网页里自己填，只存他自己的浏览器。
+
+## 来源与协议（先说清楚）
+
+| 项目 | 内容 |
+|---|---|
+| 上游项目 | [deepseek-ai/chat-demo](https://github.com/deepseek-ai/chat-demo)，官方在线版 https://deepseek-ai.github.io/chat-demo/ |
+| 上游协议 | **MIT License**，Copyright (c) 2026 DeepSeek。已核对仓库 `LICENSE` 原文与 GitHub API 的 license 字段，一致 |
+| 本文来源 | 整理自《chat-demo 完整教程 · 部署与换装》HTML，仅保留两条部署路线；上游仓库的构建配置、工作流、产物结构已按当前 main 复核 |
+| 版本差异 | 原 HTML 标注基于 v0.1.1；核对时仓库 main 的 `package.json` 已是 **0.1.2**（tag 有 v0.1.0 / v0.1.1 / v0.1.2），部署相关配置未变 |
+
+MIT 允许修改、复制、分发甚至商用，条件是**保留原版权声明和许可声明**。上游仓库自带 `LICENSE`，且 `rspack.config.ts` 里有把它复制进 `dist` 的配置——正常 Fork 或 Clone 就满足合规，**别删 `LICENSE`**。改标题、换图标、改代码都可以，但不要在改版里声称是 DeepSeek 官方出品或获得背书。
+
+如果只是想用，直接打开官方在线版填自己的 Key 即可，不必部署。自建的意义只有三个：自己的域名、代码在自己手里可改、独立入口。
+
+## 准备
+
+- GitHub 账号：两条路线都要用（CF 路线用它拉代码）
+- DeepSeek API Key：`sk-` 开头，在 https://platform.deepseek.com 注册、充值、创建。**部署时不需要它**，是访问者打开网页后自己填的
+- CF 路线另外需要：Node.js 20+、pnpm、Cloudflare 免费账号（不用绑卡）
+
+## 路线 A · GitHub Pages（浏览器点鼠标，约 5 分钟）
+
+1. 打开 https://github.com/deepseek-ai/chat-demo → 右上角 **Fork** → 默认设置 → Create fork
+2. 去 `https://github.com/你的用户名/chat-demo/settings/pages`，把 **Build and deployment → Source** 从 `Deploy from a branch` 改成 **`GitHub Actions`**。这步不能跳：工作流的 build 任务只有 `pages: read` 权限，不先切换来源，deploy 会报 `Get Pages site failed`
+3. 去 `https://github.com/你的用户名/chat-demo/actions/workflows/pages.yml`。若顶部提示 *Workflows aren't being run on this forked repository*，先点里面的启用按钮。然后 **Run workflow** → 分支选 `main` → 点绿色 Run workflow
+4. 等 `build` 和 `deploy` 两个任务都变绿勾。网址固定为：
+   ```
+   https://你的用户名.github.io/chat-demo/
+   ```
+5. 打开网址 → 左下角 Settings → General → 粘入 `sk-` 开头的 Key，即可对话。Key 只写进当前浏览器，别人打开看到的是空白，要各自填各自的
+
+以后改完代码 push 到 `main`，工作流自动重新构建发布，不用再手动点 Run workflow。
+
+## 路线 B · Cloudflare Workers（命令行，约 10 分钟）
+
+原理：把构建好的 `dist` 交给 Workers 的静态资源托管，Cloudflare 生成一个只发文件的 Worker，不用写服务端代码，也不用配环境变量。
+
+```bash
+git clone https://github.com/deepseek-ai/chat-demo.git
+cd chat-demo
+pnpm install
+pnpm build
+```
+
+Windows 注意：`build` 脚本里含 `rm -rf dist`，在 cmd / PowerShell 下会报错。用 **Git Bash** 或 WSL 执行，或先把脚本改成跨平台的 `node -e "require('fs').rmSync('dist',{recursive:true,force:true})"`。
+
+成功后多出 `dist/`。在项目根目录（与 `package.json` 同级）新建 `wrangler.jsonc`：
+
+```jsonc
+{
+  "name": "chat-demo",
+  "compatibility_date": "2026-11-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application"
+  }
+}
+```
+
+然后登录并部署：
+
+```bash
+npx wrangler@latest login
+npx wrangler@latest deploy
+```
+
+浏览器没弹出就把终端打印的 `dash.cloudflare.com/oauth2/auth?...` 链接手动打开。首次部署会问是否创建 Worker（输 `y`）、是否发送使用统计（输 `N`）。最后一行就是站点地址：
+
+```
+https://chat-demo.你的子域.workers.dev
+```
+
+以后更新：
+
+```bash
+git pull
+pnpm install
+pnpm build
+npx wrangler@latest deploy
+```
+
+不想每次敲命令：把代码推到自己的 GitHub 仓库并保留 `wrangler.jsonc`，然后 Cloudflare Dashboard → Workers & Pages → Create → **Import a repository**，构建命令填 `pnpm build`，部署命令保持默认 `npx wrangler deploy`。之后 push 到 main 自动发布。
+
+**不要给 Worker 配 API Key 环境变量**：应用是纯前端，请求直连 `api.deepseek.com`，Worker 只发文件。把 Key 配进 Worker 既读不到，还多一处泄露面。
+
+## 常见坑
+
+| 现象 | 处理 |
+|---|---|
+| deploy 报 `Get Pages site failed` | Pages 的 Source 没切成 GitHub Actions，回路线 A 第 2 步 |
+| `assets directory does not exist` | 没先跑 `pnpm build`，wrangler 不会替你构建；确认 `dist/index.html` 存在 |
+| Pages 打开 404 | URL 结尾带斜杠、仓库名是 `chat-demo` 不是 `chat_demo`；到 Settings → Pages 看是否有 live 提示 |
+| 更新后还是旧版本 | Cloudflare 边缘缓存了 `index.html`，无痕窗口验证或等一两分钟 |
+| 权限报错 10007 / 10000 / 403 | 重新 `wrangler login`；用 API Token 时确认有 `Workers Scripts: Edit` 与 `Account: Read` |
+| Fork 后 Actions 不跑 | 先启用 fork 上的工作流，且提交要落在 `main` |
+
+## 部署之后
+
+Key、主题、语言存在访问者浏览器的 `localStorage`（键名 `chat-demo:api-key` 等），聊天记录和附件存在 IndexedDB（库名 `chat-demo`），服务器上没有副本。换设备、清缓存、换域名都不会跟过去；聊天记录要在 Settings → Data → Export all chats 手动导出 zip 备份。Safari 连续 7 天不访问会清掉本地存储，用 Chrome / Edge 或保持每周打开一次。
+
+绑自己的域名两个平台都支持，但不会让国内访问变快——慢在线路，不在应用。
