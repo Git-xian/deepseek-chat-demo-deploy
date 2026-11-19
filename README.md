@@ -10,6 +10,7 @@
 | 上游协议 | **MIT License**，Copyright (c) 2026 DeepSeek。已核对仓库 `LICENSE` 原文与 GitHub API 的 license 字段，一致 |
 | 本文来源 | 整理自《chat-demo 完整教程 · 部署与换装》HTML，仅保留两条部署路线；上游仓库的构建配置、工作流、产物结构已按当前 main 复核 |
 | 版本差异 | 原 HTML 标注基于 v0.1.1；核对时仓库 main 的 `package.json` 已是 **0.1.2**（tag 有 v0.1.0 / v0.1.1 / v0.1.2），部署相关配置未变 |
+| 一键部署模板 | [Git-xian/chat-demo](https://github.com/Git-xian/chat-demo)：从上游 Fork，加了 `wrangler.jsonc`，专供下面的 CF 按钮克隆。Fork 保留上游 `LICENSE` 与来源信息，符合 MIT 要求 |
 
 MIT 允许修改、复制、分发甚至商用，条件是**保留原版权声明和许可声明**。上游仓库自带 `LICENSE`，且 `rspack.config.ts` 里有把它复制进 `dist` 的配置——正常 Fork 或 Clone 就满足合规，**别删 `LICENSE`**。改标题、换图标、改代码都可以，但不要在改版里声称是 DeepSeek 官方出品或获得背书。
 
@@ -34,9 +35,21 @@ MIT 允许修改、复制、分发甚至商用，条件是**保留原版权声�
 
 以后改完代码 push 到 `main`，工作流自动重新构建发布，不用再手动点 Run workflow。
 
-## 路线 B · Cloudflare Workers（命令行，约 10 分钟）
+## 路线 B · Cloudflare Workers
 
 原理：把构建好的 `dist` 交给 Workers 的静态资源托管，Cloudflare 生成一个只发文件的 Worker，不用写服务端代码，也不用配环境变量。
+
+### 一键部署（推荐）
+
+点下面按钮，Cloudflare 会把[模板仓库](https://github.com/Git-xian/chat-demo)克隆到你自己的 GitHub 账号，自动装依赖、构建、部署。全程不用装 Node，也不用本地敲命令。
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Git-xian/chat-demo)
+
+流程里会让你确认仓库名、Worker 名，构建命令填 `pnpm build`，部署命令保持默认 `npx wrangler deploy`。部署完打开给的 `workers.dev` 地址，左下角 Settings → General 填自己的 `sk-` Key 即可。
+
+> 按钮指向的是带 `wrangler.jsonc` 的模板仓库（否则 Cloudflare 找不到静态资源配置）。它比手动路线少一步，但构建配置是固定的；想改 `name`、缓存规则这些，部署完在 Cloudflare 的 Worker → Settings → Build 里改，或克隆后改配置文件。
+
+### 手动部署（约 10 分钟）
 
 ```bash
 git clone https://github.com/deepseek-ai/chat-demo.git
