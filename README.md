@@ -10,7 +10,9 @@
 | 上游协议 | **MIT License**，Copyright (c) 2026 DeepSeek。已核对仓库 `LICENSE` 原文与 GitHub API 的 license 字段，一致 |
 | 本文来源 | 整理自《chat-demo 完整教程 · 部署与换装》HTML，仅保留两条部署路线；上游仓库的构建配置、工作流、产物结构已按当前 main 复核 |
 | 版本差异 | 原 HTML 标注基于 v0.1.1；核对时仓库 main 的 `package.json` 已是 **0.1.2**（tag 有 v0.1.0 / v0.1.1 / v0.1.2），部署相关配置未变 |
-| 一键部署模板 | [Git-xian/chat-demo](https://github.com/Git-xian/chat-demo)：从上游 Fork，加了 `wrangler.jsonc`，专供下面的 CF 按钮克隆。Fork 保留上游 `LICENSE` 与来源信息，符合 MIT 要求 |
+| 一键部署模板 | [Git-xian/chat-demo](https://github.com/Git-xian/chat-demo)：从上游 Fork，加了 `wrangler.jsonc` 和可选的云端同步接口，专供下面的 CF 按钮克隆。Fork 保留上游 `LICENSE` 与来源信息，符合 MIT 要求 |
+
+> 本仓库的改动（多出的 `worker.ts`、`src/services/chat/sync.ts`、设置里的同步区块）都是新增的原创代码，用于自托管备份，遵循上游 MIT；不改变上游授权，也不声称官方背书。
 
 MIT 允许修改、复制、分发甚至商用，条件是**保留原版权声明和许可声明**。上游仓库自带 `LICENSE`，且 `rspack.config.ts` 里有把它复制进 `dist` 的配置——正常 Fork 或 Clone 就满足合规，**别删 `LICENSE`**。改标题、换图标、改代码都可以，但不要在改版里声称是 DeepSeek 官方出品或获得背书。
 
@@ -65,13 +67,15 @@ Windows 注意：`build` 脚本里含 `rm -rf dist`，在 cmd / PowerShell 下�
 ```jsonc
 {
   "name": "chat-demo",
-  "compatibility_date": "2026-11-01",
+  "compatibility_date": "2026-11-19",
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
   }
 }
 ```
+
+这是纯静态版。想要下面的「云端同步」，把模板仓库里的 `worker.ts`、`src/services/chat/sync.ts`、`src/components/settings/SyncSetting.tsx` 也拷进来，并用模板仓库那份带 `main` 和 `r2_buckets` 的 `wrangler.jsonc`。
 
 然后登录并部署：
 
@@ -99,6 +103,53 @@ npx wrangler@latest deploy
 
 **不要给 Worker 配 API Key 环境变量**：应用是纯前端，请求直连 `api.deepseek.com`，Worker 只发文件。把 Key 配进 Worker 既读不到，还多一处泄露面。
 
+## 云端同步（可选，仅 CF 版 / 模板仓库）
+
+默认所有数据只在本机。模板仓库多做了一个开关：**把聊天记录备份到 Cloudflare R2**，解决 Safari 七天清数据、换设备、清缓存丢记录的问题。只搬聊天记录，**API Key 永远不上传**，它仍只存在填 Key 的那台设备浏览器里。
+
+原理很简单：点「上传」就是把现有的整份历史 ZIP 存进你自己的 R2；点「恢复」就是下载下来走一遍原有的导入流程（有覆盖确认、校验、原子替换）。所以云端和本地是**整包覆盖**关系，不是逐条合并——谁后写谁生效，别在两台设备各聊一半再互相覆盖。
+
+### 用一键按钮部署（已带同步）
+
+按钮指向的模板仓库已经包含同步代码和 R2 配置。Cloudflare 部署按钮会**自动创建并绑定 R2 bucket**（官方支持 KV / D1 / R2 等资源的自动配置），部署时按提示确认资源名即可，不用手动建 bucket、也不用配密钥。构建命令 `pnpm build`，部署命令保持 `npx wrangler deploy`。部署完打开站点，会看到多了同步区块。
+
+### 手动部署要改的两处
+
+1. 按上面路线 B 拷入三个新文件（`worker.ts`、`src/services/chat/sync.ts`、`src/components/settings/SyncSetting.tsx`），i18n 两个文件和 `SettingsDialog.tsx`、`Settings.module.css` 用模板仓库的最新版。
+2. `wrangler.jsonc` 换成带 Worker 入口和 R2 绑定的版本：
+
+```jsonc
+{
+  "name": "chat-demo",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-19",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "r2_buckets": [{ "binding": "BACKUP", "bucket_name": "chat-demo-sync" }]
+}
+```
+
+先建 bucket：`npx wrangler r2 bucket create chat-demo-sync`（名字要和 `bucket_name` 一致；已有 bucket 可改名复用）。然后 `pnpm build && npx wrangler deploy`。`run_worker_first` 让 `/api/*` 走 Worker、其余走静态文件，这是同步接口能被请求到的关键。
+
+### 怎么用
+
+1. 左下角 Settings → Data → 云端同步，点「生成」得到一串 32 位同步码，它自动保存在本机。
+2. 点「上传到云端」，整份聊天记录存入 R2。
+3. 另一台设备打开同一网址，在同步码框里**填同一串码**，点「从云端恢复」→ 确认覆盖，记录就过去了。以后哪台更新了就重新上传，另一台再恢复。
+
+**同步码就是密码**：服务端不存用户身份，谁能报出这串码，谁就能读写那份备份。用「生成」按钮出随机码，别用生日、手机号之类可猜的；也别把码发到公开渠道。它只存本机 `localStorage`（键 `chat-demo:sync-code`），不进导出归档、不发往 DeepSeek。忘了码等于丢了那份云端备份的入口。
+
+### 边界
+
+- 只同步聊天记录和图片，API Key、主题、语言等设置不跨设备，换设备要各自填 Key。
+- 整包覆盖，不合并、不做冲突处理；多设备请固定「一台写、其余只读恢复」。
+- R2 免费额度 10 GB/月存储，个人聊天记录几乎用不满。备份里没有加密，R2 由你的 CF 账号和同步码两层把守，别在共享电脑上留着同步码。
+- GitHub Pages 版本没有后端，不支持同步；设置里会提示需要 CF Worker 版。
+
 ## 常见坑
 
 | 现象 | 处理 |
@@ -109,9 +160,12 @@ npx wrangler@latest deploy
 | 更新后还是旧版本 | Cloudflare 边缘缓存了 `index.html`，无痕窗口验证或等一两分钟 |
 | 权限报错 10007 / 10000 / 403 | 重新 `wrangler login`；用 API Token 时确认有 `Workers Scripts: Edit` 与 `Account: Read` |
 | Fork 后 Actions 不跑 | 先启用 fork 上的工作流，且提交要落在 `main` |
+| 同步区块点上传报「无法连接云端」 | 部署的不是模板仓库（缺 `worker.ts`），或 `wrangler.jsonc` 没配 `main` / `r2_buckets`；Pages 版不支持同步 |
+| 同步报「云端还没有备份」 | 这台设备还没上传过，或同步码填错；换设备要用同一串码 |
+| 部署报 `bucket not found` | R2 bucket 没建或名字和 `bucket_name` 不一致；`npx wrangler r2 bucket create chat-demo-sync` |
 
 ## 部署之后
 
-Key、主题、语言存在访问者浏览器的 `localStorage`（键名 `chat-demo:api-key` 等），聊天记录和附件存在 IndexedDB（库名 `chat-demo`），服务器上没有副本。换设备、清缓存、换域名都不会跟过去；聊天记录要在 Settings → Data → Export all chats 手动导出 zip 备份。Safari 连续 7 天不访问会清掉本地存储，用 Chrome / Edge 或保持每周打开一次。
+Key、主题、语言存在访问者浏览器的 `localStorage`（键名 `chat-demo:api-key` 等），聊天记录和附件存在 IndexedDB（库名 `chat-demo`）。默认情况下服务器没有副本，换设备、清缓存、换域名都不会跟过去；可以手动导出 zip，或按上面「云端同步」把记录备份到自己的 R2。**API Key 不随同步上传**，只留在填 Key 的那台设备。Safari 连续 7 天不访问会清掉本地存储，用 Chrome / Edge、保持每周打开一次，或开着云同步。
 
 绑自己的域名两个平台都支持，但不会让国内访问变快——慢在线路，不在应用。
